@@ -1,0 +1,173 @@
+---
+title: "Assignment2-Barlow-isteves"
+author: "Catresa Barlow"
+date: "04/03/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## GitHub User Description and User Page URL
+Irene Steves - 
+Avid #rstats user & developer. Open science enthusiast. Ecologist & nature nerd. Formerly a intern @rstudio and Data Science Fellow @NCEAS. Irene has sixty-two (62) repos and fifty-five (55) followers. Irene Steve's GitHub page url <https://github.com/isteves>.
+
+
+## Assignment2-json-folders.zip link
+The data used in assignment2 is located at <https://github.com/cbarlow6/CIS8392.git>
+
+## User's Basic Information 
+The table summarizes user name, login, id, repositories, followers, and creation date for isteves' account.
+```{r library, include=FALSE}
+library(gh)
+library(tidyverse)
+library(foreach) 
+library(tibble)
+library(jsonlite)
+library(ggplot2)
+library(stringr)
+library(knitr)
+
+```
+
+```{r user}
+isteves <- gh("/users/isteves", .limit = Inf)
+
+isteves_df <- tibble(user_name = isteves$name, user_login = isteves$login, 
+                     user_id = isteves$id, repos = isteves$public_repos,
+                     followers = isteves$followers, 
+                     date_created = as.Date(isteves$created_at))
+kable(isteves_df)
+```
+
+
+## Followers' Basic Information
+The table summarizes followers' login, id, and url.
+```{r followers}
+follower <- "follower/" #followers folder in your working directory
+f_names <- list.files(follower, recursive = T) #get all filenames under follower
+follower_path <- str_c(follower, f_names) # set follower file path
+
+#to collect values from follower json files
+follower_df <-foreach(i = 1:length(f_names), .combine = rbind) %do% 
+  {value <- fromJSON(follower_path[i])
+  tibble(follower_login = value$login, follower_id = value$id, 
+         follower_url = value$url)
+  }
+```
+```{r follower_table}
+kable(head(follower_df))
+```
+
+## User's Repositories
+The table summarizes each repository by language, size, fork count, stargazer count, watcher count, open issues count and date created.
+```{r repos}
+repo <- "repo/" #repo folder in your working directory
+r_names <-list.files(repo, recursive = TRUE) # get all filenames under repo
+repo_path <- str_c(repo, r_names) #set file path
+
+#to collect values from repo json files
+repo_df <- foreach(i = 1:length(r_names), .combine = rbind) %do% 
+  {value <- fromJSON(repo_path[i])
+    if(is.list(value$language) == TRUE) {
+      value$language <- "unknown"
+    }
+  tibble(repo_name = value$name, language = value$language, 
+         size = value$size, fork_count = value$forks_count,
+         stargazers_count = value$stargazers_count, 
+         watcher_count = value$watchers_count,
+         open_issue_count = value$open_issues_count,
+         created = as.Date(value$created_at))
+  }
+```
+```{r repo_table}
+kable(head(repo_df))
+```
+
+## Summary of Issues by Repository
+The table summarizes total issue events, the number of open issues and closed issues, and the average time to close issues by repository.  
+
+```{r issues}
+issue <- "issue/" #issue folder in working directory
+issue_names <- list.files(issue, recursive = T) #get all filenames under issue
+issue_path <- str_c(issue, issue_names) #file path
+
+#to collect values from json files
+issue_df <- foreach(i = 1:length(issue_names), .combine = rbind) %do% 
+  {if(is.list(fromJSON(issue_path[i])) == TRUE){
+    i_value <- fromJSON(issue_path[i])
+    r_value <- fromJSON(repo_path[i])
+    tibble(repo_name = r_value$name,
+          issues_all = max(as.numeric(i_value$number)),
+          no_of_open_issues = r_value$open_issues, 
+          no_of_closed_issues = (issues_all - no_of_open_issues))
+        }
+  }
+```
+``` {r final_issues} 
+issue <- "issue/" #issue folder in working directory
+issue_df_names <- as.list(issue_df$repo_name) #get files with closed issues
+issue_files <- str_c(issue, issue_df_names, "_issue.json") #file path
+
+#to collect issue open and close dates by repo from json files
+df <- foreach(i = 1:length(issue_files), .combine = rbind) %do%
+{file <- fromJSON(issue_files[i])
+df2 <-  foreach(j = 1:length(file$state), .combine = rbind) %do%
+    {if(file$state[j] == "closed"){
+      open <- as.Date(unlist(file$created_at[j]))
+      closed <-as.Date(unlist(file$closed_at[j]))
+      repo_url <- unlist(file$repository_url[j])
+      tibble(repo_name = str_sub(repo_url, start = 38), open = open, 
+             closed = closed, duration = (closed - open))
+    }
+    }
+  df2
+}
+
+#to group issues by repository and calculate avg duration to close
+duration_df <- df %>%
+  group_by(repo_name) %>%
+  summarise(avg_days_to_close = mean(duration)) 
+
+#to join issues table and duration table
+issues_final <- issue_df %>% left_join(duration_df)
+
+kable(head(issues_final))
+```
+
+## Plots
+Plot1 - Total number of issue events by repository. The plot shows that the typo repository has the highest number of issue events and the highest number of open issues.
+
+
+```{r events, echo=FALSE}
+plot1 <- ggplot(issue_df, aes(repo_name, issues_all, fill = no_of_open_issues)) +
+  geom_bar(stat = "identity")
+
+plot1 <- plot1 + theme(axis.text.x = element_text(size = 7, angle = 45))
+
+plot1
+```
+
+
+
+Plot2- Summarizes the count for each language used in isteve's repositories. Irene Steves uses R most often in her GitHub repositories.
+
+
+```{r languages, echo=FALSE}
+plot2 <- ggplot(repo_df, aes(language)) + geom_bar()
+
+plot2
+```
+
+
+
+Plot3- Summarizes the 10 largest repositories by size and language. Repositories caret, CoordinateCleaner, rdataone, kableExtra, and bookdown all use R.
+
+```{r lang, echo=FALSE}
+options(scipen = 999)
+filter_df <- filter(repo_df, size > 14000)
+plot3 <-ggplot(filter_df, aes(language, size, color = repo_name)) + geom_point()
+
+plot3
+```

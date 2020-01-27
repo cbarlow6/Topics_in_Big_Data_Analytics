@@ -1,0 +1,396 @@
+---
+title: "Assignment4-Barlow-NYC_Flight_Delay"
+author: "Catresa Barlow"
+date: "5/01/2019"
+output:
+  html_document:
+    toc: yes
+  word_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+#install.packages("knitr", repos = "https://cran.r-project.org")
+#install.packages("skimr")
+#install.packages("kableExtra")
+#install.packages("recipes")
+#install.packages("h2o")
+#install.packages("caret")
+#install.packages("keras")
+#install.packages("bindrcpp")
+library(caret)
+library(tidyverse)
+library(keras)
+library(skimr)
+library(recipes)
+library(h2o)
+library(lubridate)
+library(kableExtra)
+library(bindrcpp)
+library(knitr)
+#tinytex::install_tinytex()
+```
+
+#Description, Summary, and Page URL
+
+NYC Flight Delays
+This dataset contains information about flights departing from NYC airports (EWR, JFK, and LGA) in 2013. The data contains 336k rows and 19 columns. The columns include the following data - year, month, day, dep_time, sched_dep_time, dep_delay, arr_time, sched_arr_time, arr_delay, carrier, flight, tailnum, origin, dest, air_time, distance, hour, minute, time_hour.  
+Link to dataset <https://www.kaggle.com/lampubhutia/nyc-flight-delay>
+
+##Load Data and Show Summary Statistics
+
+```{r load_data}
+flights <- read_csv("flight_data.csv")
+summary(flights)
+```
+
+#Visualize
+Plot1 - Number of flight delays
+```{r freqpoly, cache=TRUE}
+data <- flights %>%
+  na.omit() %>%
+  sample_n(10000)
+
+plot1 <- ggplot(data) +
+  geom_freqpoly((aes(x = dep_delay)), binwidth = 2.5) +
+  labs(x = "departure delay (minutes)", y = "number of delays") 
+
+plot1
+```
+
+Plot2 - Flight delays (minutes) by distance
+```{r point}
+plot2 <- ggplot(data, aes(x=distance, y=dep_delay)) + 
+  geom_point() 
+
+plot2
+```
+
+Plot3 - Number of flight delays by departure hour
+```{r col}
+Plot3 <- ggplot(data, aes(x=hour)) +
+  geom_bar() +
+  labs(x = "departure hour", y= "number of delays" ) 
+
+Plot3  
+```
+
+Plot4 - Number of delays by carrier and origin
+```{r col2}
+plot4 <- ggplot(data, aes(origin)) +
+  geom_bar() + 
+  facet_wrap(~carrier) +
+  labs(x = "origin", y= "number of delays" ) 
+
+plot4
+```
+
+#Summarize and discuss the patterns
+A subset of the dataset (5k rows) was used for the visualizations. 
+Plot1 shows the majority of flights from NYC airports departed on-time in 2013.
+Plot2 plots dep_delay by distance for all three airports. According to Plot2, shorter distances experienced delays similar to longer distances. This observation suggests that distance has a limited impact on flight delays. 
+Plot3 shows that flights were scheduled to depart between the hours of 500 (5am) and 2400 (12am). The majority of flight delays occurred in the morning between 5am - 9am. Plot4 shows that carriers, EV, UA, and B6 experienced the largest number of delays with those delayed flights originating out of EWR and JFK.
+
+#Preprocess Data
+```{r preprocess}
+#add target variable
+flights_df <- flights %>%
+  add_column(delayed = ifelse(flights$arr_delay > 0, 1, 0)) %>%
+  na.omit()
+
+#calculate day of week
+date <- ymd(str_c(flights_df$year, "-",flights_df$month, "-", flights_df$day))
+day_of_week <- as.character(wday(date, label=TRUE))
+
+#add day of week column and select predictors
+flights_df <- flights_df %>%
+  add_column(day_of_week) %>%
+  select(day_of_week, hour, carrier, origin, dest, delayed)
+
+summary(flights_df)
+
+```
+
+Split data into train (60%) and test (40%)
+```{r split, cache=TRUE}
+# partition the data
+
+train.index <- sample(c(1:dim(flights_df)[1]), dim(flights_df)[1]*0.6)  
+train.df <- flights_df[train.index, ]
+test.df <- flights_df[-train.index, ]
+
+# Training data: Separate into x and y tibbles
+x_train_tbl <- train.df %>% select(-delayed) 
+y_train_tbl <- train.df %>% select(delayed)
+# Testing data: 
+x_test_tbl <- test.df
+
+# Remove the original data to save memory
+rm(train.df) 
+rm(test.df)
+
+```
+
+Inspect Data
+```{r inspect, cache=TRUE}
+x_train_tbl_skim = skim_to_list(x_train_tbl) 
+names(x_train_tbl_skim)
+
+kable(x_train_tbl_skim$character)
+kable(x_train_tbl_skim$numeric)
+```
+
+Convert Data
+```{r convert, cache=TRUE}
+string_2_factor_names <- x_train_tbl %>%
+  select_if(is.character) %>% 
+  names() 
+
+kable(string_2_factor_names)
+
+unique_numeric_values_tbl <- x_train_tbl %>% 
+  select_if(is.numeric) %>%
+  purrr::map_df(~ unique(.) %>% 
+  length()) %>% 
+  gather() %>% 
+  arrange(value) %>% 
+  mutate(key = as_factor(key))
+
+
+factor_limit <- 7 # if the numeric column has less than 7 dintinct values 
+                  # we consider it as a factor
+num_2_factor_names <- unique_numeric_values_tbl %>% 
+  filter(value < factor_limit) %>% 
+  arrange(desc(value)) %>%
+  pull(key) %>%
+  as.character() 
+
+kable(num_2_factor_names)
+```
+
+
+Data Transformation
+```{r recipe, cache=TRUE}
+rec_obj <- recipe(~ ., data = x_train_tbl) %>%
+  step_string2factor(string_2_factor_names) %>%
+  step_meanimpute(all_numeric()) %>% 
+  step_modeimpute(all_nominal()) %>% 
+  prep(stringsAsFactors = FALSE)
+
+```
+
+```{r processed, cache= TRUE}
+x_train_processed_tbl <- bake(rec_obj, x_train_tbl) 
+x_test_processed_tbl <- bake(rec_obj, x_test_tbl)
+
+x_train_tbl %>%
+  select(1:5) %>%
+  glimpse()
+
+x_train_processed_tbl %>% 
+  select(1:5) %>% 
+  glimpse()
+
+rec_obj_for_y <- recipe(~ ., data = y_train_tbl) %>% 
+  step_num2factor("delayed") %>% 
+  prep(stringsAsFactors = FALSE)
+
+y_train_processed_tbl <- bake(rec_obj_for_y, y_train_tbl)
+
+kable(head(y_train_tbl))
+
+kable(head(y_train_processed_tbl))
+```
+
+#Analysis of Data 
+
+```{r initiate}
+h2o.init(nthreads = -1) #-1 for using all cores
+h2o.removeAll() ## clean slate - just in case the cluster was already running
+```
+
+Push data into h2o
+```{r push, cache= TRUE}
+# push data into h2o
+data_h2o <- as.h2o(
+  bind_cols(y_train_processed_tbl, x_train_processed_tbl), 
+  destination_frame="train.hex" #destination_frame is optional
+)
+
+new_data_h2o <- as.h2o(
+  x_test_processed_tbl,
+  destination_frame= "test.hex" #destination_frame is optional 
+)
+
+h2o.ls()
+```
+
+Split Data
+```{r partition, cache=TRUE}
+# Partition the data into training, validation and test sets
+splits <- h2o.splitFrame(data = data_h2o,
+                         ratios = c(0.7, 0.15), # 70/15/15 split
+                         seed = 1234)
+              
+train_h2o <- splits[[1]]
+valid_h2o <- splits[[2]]
+test_h2o <- splits[[3]]
+
+```
+
+Modeling - Deep Learning
+```{r deeplearning, cache=TRUE, results="hide"}
+y <- "delayed"
+x <- setdiff(names(train_h2o), y)
+
+m1 <- h2o.deeplearning(x = x, y = y, training_frame = train_h2o, 
+                       model_id = "dl_model_first", 
+                       validation_frame = valid_h2o
+                       #activation="Rectifier", 
+                       #hidden=c(200,200),
+                       #epochs = 1
+                       )
+```
+
+Summarize Model
+```{r model_summary}
+summary(m1)
+```
+
+Save Model
+```{r save}
+h2o.saveModel(object=m1, # the model you want to save 
+              path=getwd(), # the folder to save
+              force=TRUE) # whether to overwrite an existing file 
+
+model_filepath = str_c(getwd(), "/dl_model_first") #dl_model_first is model_id 
+
+```
+
+Load DL
+```{r load_dl}
+m1 <- h2o.loadModel(model_filepath)
+```
+
+Random Hyper-Parameter Search
+```{r hyper_params, cache=TRUE}
+hyper_params2 <- list(
+activation = c("Rectifier", "Tanh", "Maxout", "RectifierWithDropout",
+               "TanhWithDropout", "MaxoutWithDropout"),
+hidden = list( c(20,20), c(50,50), c(30,30,30), c(25,25,25,25)), 
+input_dropout_ratio = c(0, 0.05),
+l1 = seq(0, 1e-4, 1e-6),
+l2 = seq(0, 1e-4, 1e-6)
+)
+
+```
+
+```{r random, cache=TRUE}
+search_criteria = list(
+  strategy = "RandomDiscrete", 
+  seed=1234567,
+  stopping_metric = "auto", 
+  stopping_rounds=5,
+  stopping_tolerance=1e-2,
+  max_runtime_secs = 360, 
+  max_models = 100
+)
+```
+
+```{r grid, cache= TRUE, results="hide"}
+grid2 <- h2o.grid(
+  algorithm = "deeplearning", 
+  grid_id = "dl_grid_random",
+  
+  x = x, 
+  y = y,
+  
+  training_frame = train_h2o, 
+  validation_frame = valid_h2o,
+  
+  epochs=1, 
+  stopping_metric="logloss", 
+  stopping_tolerance=1e-2, 
+  stopping_rounds=2, 
+  score_validation_samples=10000,
+  score_duty_cycle=0.025, 
+  max_w2=10,
+  hyper_params = hyper_params2, 
+  search_criteria = search_criteria
+)
+```
+
+```{r best, cache=TRUE}
+grid2 <- h2o.getGrid("dl_grid_random",sort_by="logloss",decreasing=FALSE)
+
+dl_grid_random_summary_table <- grid2@summary_table
+
+dl_grid_random_best_model <- h2o.getModel(dl_grid_random_summary_table$model_ids[1])
+summary(dl_grid_random_best_model)
+                                                                                      dl_grid_random_best_model_params <- dl_grid_random_best_model@allparameters 
+                                                                                         
+```
+
+```{r dl_pred, cache=TRUE}
+prediction_h2o_dl <- h2o.predict(dl_grid_random_best_model,
+                                 newdata = new_data_h2o)
+prediction_dl_tbl <- tibble(
+  id = rownames(x_test_processed_tbl), 
+  delayed = as.vector(prediction_h2o_dl$p1)
+)
+
+kable(head(prediction_h2o_dl))
+
+kable(head(prediction_dl_tbl))
+```
+
+AutoML
+```{r automl, cache=TRUE, results='hide'}
+automl_models_h2o <- h2o.automl(
+  x = x,
+  y = y,
+  training_frame = train_h2o, 
+  validation_frame = valid_h2o, 
+  leaderboard_frame = test_h2o, 
+  max_runtime_secs = 300
+)
+```
+
+```{r automl_acc, cache=TRUE}
+automl_leaderboard <- automl_models_h2o@leaderboard 
+automl_leaderboard # H2O was only able to try 4 models
+
+automl_leader <- automl_models_h2o@leader
+
+performance_h2o <- h2o.performance(automl_leader, newdata = test_h2o)
+
+performance_h2o %>% 
+  h2o.confusionMatrix()
+
+performance_h2o %>% 
+  h2o.auc()
+```
+
+
+```{r automl_pred, cache=TRUE}
+prediction_h2o_automl <- h2o.predict(automl_leader,
+                                     newdata = new_data_h2o)
+prediction_automl_tbl <- tibble(
+  id = rownames(x_test_processed_tbl), 
+  delayed = as.vector(prediction_h2o_automl$p1)
+) 
+
+kable(head(prediction_automl_tbl))
+
+```
+
+#Evaluation  
+The deeplearning algorithim was used to build the dl_model_first model. The more efficient random hyper-parameter search was used to build the dl_grid_random_model. The accuracy rate on the validation sets for dl_model_first and dl_grid_random_model was approximately 62-63%. The fact that most flights departed on-time means that few records represent delayed flights. Having an underrepresented class makes training the model more difficult.
+
+AutoML - Of the 6 models evaluated, the most accurate model was the StackedEnsemble_AllModels_AutoML with an accuracy of approximately 65%.
+
+
+

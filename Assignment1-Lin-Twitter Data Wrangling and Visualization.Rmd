@@ -1,0 +1,104 @@
+---
+title: "Assignment1"
+author: "Catresa Barlow"
+date: "3/12/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Description of Data
+**Source**
+##From cdc.gov [Links!](https://data.cdc.gov/NCHS/NCHS-Potentially-Excess-Deaths-from-the-Five-Leadi/vdpk-qzpr)
+
+Mortality data (2005-2015) for U.S. residents come from the National Vital Statistics System for the five leading causes of death. 
+Heart disease (I00-I09, I11, I13, and I20–I51) Cancer (C00–C97) Unintentional injury (V01–X59 and Y85–Y86) Chronic lower respiratory disease (J40–J47) Stroke (I60–I69) Locality (nonmetropolitan vs. metropolitan) is based on the Office of Management and Budget’s 2013 county-based classification scheme.
+
+Benchmarks are based on the three states with the lowest age and cause-specific mortality rates.
+
+Potentially excess deaths for each state are calculated by subtracting deaths at the benchmark rates (expected deaths) from observed deaths.
+
+“2010 Fixed” is a fixed benchmark based on the best performing States in 2010. “2005 Fixed” is a fixed benchmark based on the best performing States in 2005. “Floating” is based on the best performing States in each year so change from year to year. 
+
+Dataset contains 206k rows and 13 columns
+Dataset Columns:
+Year = col_double(),
+Cause of Death = col_character(),
+State = col_character(),
+State FIPS Code = col_character(),
+HHS Region = col_double(),
+Age Range = col_character(),
+Benchmark = col_character(),
+Locality = col_character(),
+Observed Deaths = col_double(),
+Population = col_double(),
+Expected Deaths = col_double(),
+Potentially Excess Deaths = col_double(),
+Percent Potentially Excess Deaths = col_double()
+
+
+##Load and explore cdc data
+```{r deaths}
+library(dplyr)
+library(tidyverse)
+deaths_df <- read_csv("Assignment1-Barlow-CDC_Data Wrangling and Visualization.csv")
+summary(deaths_df)
+
+head(deaths_df)
+```
+
+
+## Show and explain why the data is not tidy
+Data in the Locality column (All, Metropolitan, Nonmetropolitan) should be presented in columns (variables) along with their corresponding values (observed deaths). 
+
+Data in the Benchmark column (2005 Fixed, 2010 Fixed, and Floating) should be presented as columns along with their corresponding values (expected deaths). 
+
+State FIPS Code column contains redundant information and will be excluded.
+
+Potentially Excess Deaths and Percent Potentially Excess Deaths columns contain  redundant information and will be excluded. Potentially excess deaths (and  %) is easily calculated by subtracting the applicable benchmark (expected deaths) from observed deaths.
+
+##Tidy up the data using dplyr and/or tidyr
+```{r deaths}
+new_df <- select(deaths_df, c("Year", "Cause of Death", "State", "HHS Region",
+                              "Age Range", "Benchmark", "Locality", "Observed Deaths"))
+
+new_df2 <- select(deaths_df, c("Year", "Cause of Death", "State", "HHS Region",
+                               "Age Range", "Benchmark", "Locality", "Expected Deaths"))
+
+
+new_df2$Benchmark <- paste(new_df$Benchmark, new_df$Locality, sep = "_")
+
+colnames(new_df) <- c("Year", "Cause_of_Death", "State", "Age_Range", 
+                      "Locality", "Observed_Deaths")
+summary(new_df)
+df3 <- new_df2[ ,-7]
+new_df3 <- df3 %>% spread("Benchmark", "Expected Deaths", sep = "_")
+
+df2 <- df2[ , -6]
+nrow(distinct(df2))
+
+new_death_df <- distinct(df2)
+
+new_death_df <- new_death_df[ , -6]
+new_df3 <- new_df3[ , -c(6, 9, 12)]
+
+joined_df <- new_death_df %>% left_join(new_df3)
+#colnames(joined_df$`Locality-Metropolitan`) <- c("Observed_Locality-Metropolitan")
+colnames(joined_df)[colnames(joined_df) == "Locality-Metropolitan"] <- "Observed_Deaths_Locality-Metropolitan"
+
+colnames(joined_df)[colnames(joined_df) == "Observed_Locality-Nonmetropolitan"] <- "Observed_Deaths_Locality-Nonmetropolitan"
+
+```
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

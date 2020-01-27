@@ -1,0 +1,134 @@
+---
+title: "Assignment1"
+author: "Catresa Barlow"
+date: "3/12/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Description of Data
+**Source**
+##From cdc.gov 
+https://data.cdc.gov/NCHS/NCHS-Potentially-Excess-Deaths-from-the-Five-Leadi/vdpk-qzpr
+
+Mortality data (2005-2015) for U.S. residents come from the National Vital Statistics System for the five leading causes of death. 
+Heart disease (I00-I09, I11, I13, and I20–I51) Cancer (C00–C97) Unintentional injury (V01–X59 and Y85–Y86) Chronic lower respiratory disease (J40–J47) Stroke (I60–I69) Locality (nonmetropolitan vs. metropolitan) is based on the Office of Management and Budget’s 2013 county-based classification scheme.
+
+Benchmarks are based on the three states with the lowest age and cause-specific mortality rates.
+
+Potentially excess deaths for each state are calculated by subtracting deaths at the benchmark rates (expected deaths) from observed deaths.
+
+“2010 Fixed” is a fixed benchmark based on the best performing States in 2010. “2005 Fixed” is a fixed benchmark based on the best performing States in 2005. “Floating” is based on the best performing States in each year so change from year to year. 
+
+Dataset contains 206k rows and 13 columns
+Dataset Columns:
+Year = col_double(),
+Cause of Death = col_character(),
+State = col_character(),
+State FIPS Code = col_character(),
+HHS Region = col_double(),
+Age Range = col_character(),
+Benchmark = col_character(),
+Locality = col_character(),
+Observed Deaths = col_double(),
+Population = col_double(),
+Expected Deaths = col_double(),
+Potentially Excess Deaths = col_double(),
+Percent Potentially Excess Deaths = col_double()
+
+
+##Load and explore cdc data
+```{r data}
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+deaths_df <- read_csv("Assignment1-Barlow-CDC_Data Wrangling and Visualization.csv")
+summary(deaths_df)
+
+head(deaths_df)
+```
+
+
+## Show and explain why the data is not tidy
+Data in the Locality column (All, Metropolitan, Nonmetropolitan) should be presented in columns (variables) along with their corresponding values (observed deaths). 
+
+Data in the Benchmark column (2005 Fixed, 2010 Fixed, and Floating) should be presented as columns along with their corresponding values (expected deaths). 
+
+State FIPS Code column contains redundant information and will be excluded.
+
+Potentially Excess Deaths and Percent Potentially Excess Deaths columns contain  redundant information and will be excluded. Potentially excess deaths (and  %) is easily calculated by subtracting the applicable benchmark (expected deaths) from observed deaths.
+
+##Tidy up the data using dplyr and/or tidyr
+```{r deaths}
+observed_df <- select(deaths_df, c("Year", "Cause of Death", "State", "HHS Region",
+                              "Age Range", "Locality", "Observed Deaths"))
+
+expected_df <- select(deaths_df, c("Year", "Cause of Death", "State", "HHS Region",
+                               "Age Range", "Benchmark", "Expected Deaths"))
+
+colnames(observed_df) <- c("Year", "Cause_of_Death", "State", "HHS_Region",
+                           "Age_Range","Locality", "Observed_Deaths")
+
+colnames(expected_df) <- c("Year", "Cause_of_Death", "State", "HHS_Region",
+                           "Age_Range","Benchmark", "Expected_Deaths")
+
+expected_df$Benchmark <- paste(deaths_df$Benchmark, deaths_df$Locality, sep = "_")
+observed_df$Locality <- paste("Observed_Deaths", deaths_df$Locality, sep = "-")
+
+#df3 <- new_df2[ ,-7]
+expected_df <- expected_df %>% spread("Benchmark", "Expected_Deaths", sep = "_")
+
+observed_df <- observed_df %>% 
+  group_by(Locality) %>% 
+  mutate(grouped_id = row_number())
+
+observed_df <- observed_df %>% 
+  spread("Locality", "Observed_Deaths", sep = "-") %>% 
+  select(-grouped_id)
+
+#observed_df <- observed_df %>% spread(Locality, Observed_Deaths, sep = "-")
+
+
+nrow(distinct(observed_df))
+
+observed_df <- distinct(observed_df)
+
+#new_death_df <- new_death_df[ , -6]
+expected_df <- expected_df[ , -c(6, 9, 12)]
+
+joined_df <- observed_df %>% inner_join(expected_df)
+
+```
+## Tidy data
+New columns were created for observed deaths and expected deaths (benchmarks) using spread().
+Redundant data was excluded using select().
+Variables are in columns, observations are in rows, and values are in cells.
+
+## Data Visualization
+Create two different & meaningful data visualization out of the tidy data using ggplot. Identify the patterns in each plot and explain why they are meaningful.
+
+Number of deaths by state 2005-2015.
+Plot A identifies which states have the highest mortality rate by year. Plot shows that Alabama consistently has a high mortality rate.
+```{r barplot, echo=FALSE}
+ggplot(data = joined_df) + 
+  geom_bar(mapping = aes(x = Year, fill = State), position = "dodge" )
+```
+
+Plot B identifies the number of deaths for each year by cause of death. The plot shows that heart disease is the leading cause of death.
+```{r plotb, echo=FALSE}
+ggplot(data = joined_df) + 
+  geom_bar(mapping = aes(x = Year, fill = Cause_of_Death))
+```
+
+```{r freqploy, echo=FALSE}
+
+smaller <- joined_df %>% 
+  filter(state == "Alabama")
+
+smaller %>% 
+  ggplot(aes(state)) + 
+  geom_freqpoly(binwidth = 0.01)
+```
